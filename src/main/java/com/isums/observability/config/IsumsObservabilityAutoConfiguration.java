@@ -3,6 +3,10 @@ package com.isums.observability.config;
 import java.util.HashMap;
 import java.util.Map;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.isums.observability.audit.AuditPublisher;
 import com.isums.observability.audit.AuditPublisherAspect;
 import com.isums.observability.audit.KafkaAuditPublisher;
@@ -65,14 +69,21 @@ public class IsumsObservabilityAutoConfiguration {
         Map<String, Object> props = new HashMap<>();
         props.put(ProducerConfig.BOOTSTRAP_SERVERS_CONFIG,
                 environment.getProperty("spring.kafka.bootstrap-servers", "localhost:9092"));
-        props.put(ProducerConfig.KEY_SERIALIZER_CLASS_CONFIG, StringSerializer.class);
-        props.put(ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG, JsonSerializer.class);
         props.put(ProducerConfig.ACKS_CONFIG, "all");
         props.put(ProducerConfig.ENABLE_IDEMPOTENCE_CONFIG, true);
         props.put(ProducerConfig.RETRIES_CONFIG, properties.getAudit().getProducerRetries());
         props.put(ProducerConfig.INTERCEPTOR_CLASSES_CONFIG, ContextPropagatingProducerInterceptor.class.getName());
-        props.put(JsonSerializer.ADD_TYPE_INFO_HEADERS, false);
-        KafkaTemplate<String, Object> kafkaTemplate = new KafkaTemplate<>(new DefaultKafkaProducerFactory<>(props));
+
+        ObjectMapper auditObjectMapper = JsonMapper.builder()
+                .addModule(new JavaTimeModule())
+                .disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS)
+                .build();
+        JsonSerializer<Object> valueSerializer = new JsonSerializer<>(auditObjectMapper);
+        valueSerializer.setAddTypeInfo(false);
+
+        DefaultKafkaProducerFactory<String, Object> producerFactory =
+                new DefaultKafkaProducerFactory<>(props, new StringSerializer(), valueSerializer);
+        KafkaTemplate<String, Object> kafkaTemplate = new KafkaTemplate<>(producerFactory);
         return new KafkaAuditPublisher(kafkaTemplate, properties, tracerProvider);
     }
 
